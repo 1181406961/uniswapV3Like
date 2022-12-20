@@ -15,13 +15,54 @@ library Params {
         bool shouldTransferInCallback;
         bool mintLiquidity;
     }
+
+    function createPool(
+        TestCaseParams memory self,
+        ERC20Mintable token0,
+        ERC20Mintable token1
+    ) public returns (UniswapV3Pool pool) {
+        pool = new UniswapV3Pool(
+            address(token0),
+            address(token1),
+            self.currentSqrtP,
+            self.currentTick
+        );
+    }
+
+    function poolMint(
+        TestCaseParams memory self,
+        UniswapV3Pool pool,
+        ERC20Mintable token0,
+        ERC20Mintable token1,
+        address approvees
+    ) public returns (uint256 poolBalance0, uint256 poolBalance1) {
+        token0.mint(address(this), self.wethBalance);
+        token1.mint(address(this), self.usdcBalance);
+        token0.approve(approvees, self.wethBalance);
+        token1.approve(approvees, self.usdcBalance);
+        UniswapV3Pool.CallbackData memory data = UniswapV3Pool.CallbackData({
+            token0: address(token0),
+            token1: address(token1),
+            payer: address(this)
+        });
+        if (self.mintLiquidity) {
+            (poolBalance0, poolBalance1) = pool.mint(
+                address(this),
+                self.lowerTick,
+                self.upperTick,
+                self.liquidity,
+                abi.encode(data)
+            );
+        }
+    }
 }
 
 contract UniswapV3PoolTest is Test {
+    using Params for Params.TestCaseParams;
     ERC20Mintable token0;
     ERC20Mintable token1;
     UniswapV3Pool pool;
-    bool shouldTransferInCallback;
+    bool transferInCallback;
 
     function setUp() public {
         token0 = new ERC20Mintable("Ether", "ETH", 18);
@@ -91,24 +132,14 @@ contract UniswapV3PoolTest is Test {
         internal
         returns (uint256 poolBalance0, uint256 poolBalance1)
     {
-        token0.mint(address(this), params.wethBalance);
-        token1.mint(address(this), params.usdcBalance);
-        pool = new UniswapV3Pool(
-            address(token0),
-            address(token1),
-            params.currentSqrtP,
-            params.currentTick
+        pool = params.createPool(token0, token1);
+        transferInCallback = params.shouldTransferInCallback;
+        (poolBalance0, poolBalance1) = params.poolMint(
+            pool,
+            token0,
+            token1,
+            address(this)
         );
-        shouldTransferInCallback = params.shouldTransferInCallback;
-        if (params.mintLiquidity) {
-            (poolBalance0, poolBalance1) = pool.mint(
-                address(this),
-                params.lowerTick,
-                params.upperTick,
-                params.liquidity,
-                ""
-            );
-        }
     }
 
     function testTickTooLow() public {
@@ -123,20 +154,9 @@ contract UniswapV3PoolTest is Test {
             shouldTransferInCallback: true,
             mintLiquidity: true
         });
-        pool = new UniswapV3Pool(
-            address(token0),
-            address(token1),
-            params.currentSqrtP,
-            params.currentTick
-        );
+        pool = params.createPool(token0, token1);
         vm.expectRevert(UniswapV3Pool.InvalidTickRange.selector);
-        pool.mint(
-            address(this),
-            params.lowerTick,
-            params.upperTick,
-            params.liquidity,
-            ""
-        );
+        params.poolMint(pool, token0, token1, address(this));
     }
 
     // TODO 测试太高的情况
@@ -163,10 +183,16 @@ contract UniswapV3PoolTest is Test {
         });
         (uint256 poolBalance0, uint256 poolBalance1) = setupTestCase(params);
         token1.mint(address(this), 42 ether);
+        token1.approve(address(this), 42 ether);
         int256 userBalance0Before = int256(token0.balanceOf(address(this)));
+        UniswapV3Pool.CallbackData memory data = UniswapV3Pool.CallbackData({
+            token0: address(token0),
+            token1: address(token1),
+            payer: address(this)
+        });
         (int256 amount0Delta, int256 amount1Delta) = pool.swap(
             address(this),
-            ""
+            abi.encode(data)
         );
         // 检查swap的数量是否正确
         assertEq(amount0Delta, -0.008396714242162444 ether, "invalid ETH out");
@@ -214,9 +240,14 @@ contract UniswapV3PoolTest is Test {
         uint256 amount1,
         bytes calldata data
     ) public {
-        if (shouldTransferInCallback) {
-            token0.transfer(msg.sender, amount0);
-            token1.transfer(msg.sender, amount1);
+        if (transferInCallback) {
+            UniswapV3Pool.CallbackData memory extra = abi.decode(
+                data,
+                (UniswapV3Pool.CallbackData)
+            );
+
+            IERC20(extra.token0).transferFrom(extra.payer, msg.sender, amount0);
+            IERC20(extra.token1).transferFrom(extra.payer, msg.sender, amount1);
         }
     }
 
@@ -225,17 +256,30 @@ contract UniswapV3PoolTest is Test {
         int256 amount1,
         bytes calldata data
     ) public {
+        UniswapV3Pool.CallbackData memory extra = abi.decode(
+            data,
+            (UniswapV3Pool.CallbackData)
+        );
         if (amount0 > 0) {
-            token0.transfer(msg.sender, uint256(amount0));
+            IERC20(extra.token0).transferFrom(
+                extra.payer,
+                msg.sender,
+                uint256(amount0)
+            );
         }
 
         if (amount1 > 0) {
-            token1.transfer(msg.sender, uint256(amount1));
+            IERC20(extra.token1).transferFrom(
+                extra.payer,
+                msg.sender,
+                uint256(amount1)
+            );
         }
     }
 }
 
 contract NotSwapHackerContract is Test {
+    using Params for Params.TestCaseParams;
     ERC20Mintable token0;
     ERC20Mintable token1;
     UniswapV3Pool pool;
@@ -258,21 +302,8 @@ contract NotSwapHackerContract is Test {
             shouldTransferInCallback: true,
             mintLiquidity: true
         });
-        pool = new UniswapV3Pool(
-            address(token0),
-            address(token1),
-            params.currentSqrtP,
-            params.currentTick
-        );
-        token0.mint(address(this), params.wethBalance);
-        token1.mint(address(this), params.usdcBalance);
-        pool.mint(
-            address(this),
-            params.lowerTick,
-            params.upperTick,
-            params.liquidity,
-            ""
-        );
+        pool = params.createPool(token0, token1);
+        params.poolMint(pool, token0, token1, address(this));
         vm.expectRevert(UniswapV3Pool.InsufficientInputAmount.selector);
         pool.swap(address(this), "");
     }

@@ -1,7 +1,7 @@
 pragma solidity ^0.8.14;
 import "./lib/Position.sol";
 import "./lib/Tick.sol";
-import "./lib/IUniswapV3MintCallback.sol";
+import "./lib/IUniswapV3Callback.sol";
 import "forge-std/interfaces/IERC20.sol";
 
 contract UniswapV3Pool {
@@ -151,7 +151,7 @@ contract UniswapV3Pool {
         (slot0.tick, slot0.sqrtPriceX96) = (nextTick, nextPrice);
         IERC20(token0).transfer(recipient, uint256(-amount0));
         uint256 balance1Before = balance1();
-        IUniswapV3MintCallback(msg.sender).uniswapV3SwapCallback(
+        IuniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(
             amount0,
             amount1,
             data

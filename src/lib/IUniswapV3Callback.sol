@@ -6,7 +6,9 @@ interface IUniswapV3MintCallback {
         uint256 amount1,
         bytes calldata data
     ) external;
+}
 
+interface IuniswapV3SwapCallback {
     function uniswapV3SwapCallback(
         int256 amount0,
         int256 amount1,
