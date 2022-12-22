@@ -72,7 +72,7 @@ contract UniswapV3PoolTest is Test {
     function testMintSuccess() public {
         Params.TestCaseParams memory params = Params.TestCaseParams({
             wethBalance: 1 ether,
-            usdcBalance: 5000 ether,
+            usdcBalance: 5000209190920489524100,
             currentTick: 85176,
             lowerTick: 84222,
             upperTick: 86129,
@@ -82,8 +82,8 @@ contract UniswapV3PoolTest is Test {
             mintLiquidity: true
         });
         (uint256 poolBalance0, uint256 poolBalance1) = setupTestCase(params);
-        uint256 expectedAmount0 = 0.998976618347425280 ether;
-        uint256 expectedAmount1 = 5000 ether;
+        uint256 expectedAmount0 = 998628802115141959;
+        uint256 expectedAmount1 = 5000209190920489524100;
         // 验证合同金额
         assertEq(
             poolBalance0,
@@ -145,7 +145,7 @@ contract UniswapV3PoolTest is Test {
     function testTickTooLow() public {
         Params.TestCaseParams memory params = Params.TestCaseParams({
             wethBalance: 1 ether,
-            usdcBalance: 5000 ether,
+            usdcBalance: 5000209190920489524100,
             currentTick: 85176,
             lowerTick: -887273,
             upperTick: 86129,
@@ -172,7 +172,7 @@ contract UniswapV3PoolTest is Test {
     function testSwapBuyEth() public {
         Params.TestCaseParams memory params = Params.TestCaseParams({
             wethBalance: 1 ether,
-            usdcBalance: 5000 ether,
+            usdcBalance: 5000209190920489524100,
             currentTick: 85176,
             lowerTick: 84222,
             upperTick: 86129,
@@ -192,10 +192,12 @@ contract UniswapV3PoolTest is Test {
         });
         (int256 amount0Delta, int256 amount1Delta) = pool.swap(
             address(this),
+            false, // 换出x也就是ETC,zero = false one = true
+            42 ether, // 输入y是什么
             abi.encode(data)
         );
         // 检查swap的数量是否正确
-        assertEq(amount0Delta, -0.008396714242162444 ether, "invalid ETH out");
+        assertEq(amount0Delta, -8396714242162445, "invalid ETH out");
         assertEq(amount1Delta, 42 ether, "invalid USDC in");
         // 检查sender是否正确的收到token0，减少token1
         assertEq(
@@ -293,7 +295,7 @@ contract NotSwapHackerContract is Test {
     function testSwapTokenBalanceNotEnough() public {
         Params.TestCaseParams memory params = Params.TestCaseParams({
             wethBalance: 1 ether,
-            usdcBalance: 5000 ether,
+            usdcBalance: 5000209190920489524100,
             currentTick: 85176,
             lowerTick: 84222,
             upperTick: 86129,
@@ -305,7 +307,7 @@ contract NotSwapHackerContract is Test {
         pool = params.createPool(token0, token1);
         params.poolMint(pool, token0, token1, address(this));
         vm.expectRevert(UniswapV3Pool.InsufficientInputAmount.selector);
-        pool.swap(address(this), "");
+        pool.swap(address(this), false, 42 ether, "");
     }
 
     function uniswapV3SwapCallback(
@@ -317,7 +319,7 @@ contract NotSwapHackerContract is Test {
     function uniswapV3MintCallback(
         uint256 amount0,
         uint256 amount1,
-        bytes calldata data
+        bytes calldata
     ) public {
         token0.transfer(msg.sender, amount0);
         token1.transfer(msg.sender, amount1);
