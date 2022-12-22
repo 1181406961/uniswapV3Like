@@ -108,11 +108,11 @@ contract UniswapV3Pool {
     function mint(
         // owner 是谁
         address owner,
-        // tick 上边界
+        // tick 上边界(需要用户自定义)
         int24 lowerTick,
-        // tick 下边界
+        // tick 下边界(需要用户自定义)
         int24 upperTick,
-        // 投入多少流动性
+        // 投入多少流动性(需要用户自定义)
         uint128 amount,
         bytes calldata data
     ) external returns (uint256 amount0, uint256 amount1) {
@@ -142,6 +142,7 @@ contract UniswapV3Pool {
         );
         position.update(amount);
         Slot0 memory slot0_ = slot0;
+        // 根据用户输入的流动性和price，计算出用户需要投入多少x和y。
         // amount0 => x
         amount0 = Math.calcAmount0Delta(
             slot0_.sqrtPriceX96,
@@ -192,9 +193,9 @@ contract UniswapV3Pool {
     // src/UniswapV3Pool.sol
 
     function swap(
-        address recipient,
+        address recipient, // 接受地址
         bool zeroForOne, //换出什么: zero => token0(x) one=>token1(y)
-        uint256 amountSpecified,
+        uint256 amountSpecified, // 对应换出，需要投入多少相应另一种token。比如换x，需要投入y。
         bytes calldata data
     ) public returns (int256 amount0, int256 amount1) {
         Slot0 memory slot0_ = slot0;
@@ -207,7 +208,7 @@ contract UniswapV3Pool {
         while (state.amountSpecifiedRemaining > 0) {
             StepState memory step;
             step.sqrtPriceStartX96 = state.sqrtPriceX96;
-            // 根据当前开始循环的tick，找下一个tick是什么
+            // 根据当前系统的tick，找下一个tick是什么
             (step.nextTick, ) = tickBitmap.nextInitializedTickWithinOneWord(
                 state.tick,
                 1,
@@ -215,7 +216,9 @@ contract UniswapV3Pool {
             );
             // 获取到下一个tick，然后求出对应的price是什么
             step.sqrtPriceNextX96 = TickMath.getSqrtRatioAtTick(step.nextTick);
-            // 根据当前的price和next price 算出交换后的price和需要换入换出多少
+            // 根据当前的price和找到的next price 算出交换后的price和两种token分别需要多少。
+            // 这里需要重新计算一下next price。因为上一步通过bitmap找到的可能是一个边界price，
+            // 然而交换需要token数量引起的price改变可能不会到达边界price。
             (state.sqrtPriceX96, step.amountIn, step.amountOut) = SwapMath
                 .computeSwapStep(
                     state.sqrtPriceX96,
@@ -223,14 +226,16 @@ contract UniswapV3Pool {
                     liquidity,
                     state.amountSpecifiedRemaining
                 );
+            // 更新state
             state.amountSpecifiedRemaining -= step.amountIn;
             state.amountCalculated += step.amountOut;
             state.tick = TickMath.getTickAtSqrtRatio(state.sqrtPriceX96);
         }
-        // 更新tick,到下一个价格
+        // 检查一下state，更新系统当前的tick和price。
         if (state.tick != slot0_.tick) {
             (slot0.sqrtPriceX96, slot0.tick) = (state.sqrtPriceX96, state.tick);
         }
+        // 根据 false=x true=y 来决定pool应该出和入哪种token
         (amount0, amount1) = zeroForOne
             ? (
                 int256(amountSpecified - state.amountSpecifiedRemaining),
@@ -240,7 +245,6 @@ contract UniswapV3Pool {
                 -int256(state.amountCalculated),
                 int256(amountSpecified - state.amountSpecifiedRemaining)
             );
-        // 根据方向来决定换入哪种token和换出哪种token
         if (zeroForOne) {
             IERC20(token1).transfer(recipient, uint256(-amount1));
 
@@ -264,22 +268,6 @@ contract UniswapV3Pool {
             if (balance1Before + uint256(amount1) > balance1())
                 revert InsufficientInputAmount();
         }
-        // 这里先写死,后面再改
-        // int24 nextTick = 85184;
-        // uint160 nextPrice = 5604469350942327889444743441197;
-        // amount0 = -0.008396714242162444 ether;
-        // amount1 = 42 ether;
-        // (slot0.tick, slot0.sqrtPriceX96) = (nextTick, nextPrice);
-        // IERC20(token0).transfer(recipient, uint256(-amount0));
-        // uint256 balance1Before = balance1();
-        // IuniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(
-        //     amount0,
-        //     amount1,
-        //     data
-        // );
-        // if (balance1Before + uint256(amount1) > balance1()) {
-        //     revert InsufficientInputAmount();
-        // }
         emit Swap(
             msg.sender,
             recipient,

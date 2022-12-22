@@ -54,9 +54,9 @@ library TickBitmap {
     ) internal view returns (int24 next, bool initialized) {
         int24 compressed = tick / tickSpacing;
         if (tick < 0 && tick % tickSpacing != 0) compressed--; // round towards negative infinity
-
         if (lte) {
-            // 往小于方向,也就是右边找，找是否有标记为1的位置，说明存在tick
+            // 往小于方向,也就是右边找，找是否有标记为1的位置，说明存在tick。
+            // 这个next tick 要比当前tick要小。对应换入x。
             (int16 wordPos, uint8 bitPos) = position(compressed);
             // all the 1s at or to the right of the current bitPos
             uint256 mask = (1 << bitPos) - 1 + (1 << bitPos);
@@ -72,7 +72,8 @@ library TickBitmap {
                     )) * tickSpacing
                 : (compressed - int24(uint24(bitPos))) * tickSpacing;
         } else {
-            // 往大于方向找，也就是左边找是否有标记为1的位置，说明存在tick
+            // 往大于方向找，也就是左边找是否有标记为1的位置，说明存在tick。
+            // 这个next tick 要比当前的tick大。对应换出x。
             // start from the word of the next tick, since the current tick state doesn't matter
             (int16 wordPos, uint8 bitPos) = position(compressed + 1);
             // all the 1s at or to the left of the bitPos
