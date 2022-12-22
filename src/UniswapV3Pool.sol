@@ -190,8 +190,7 @@ contract UniswapV3Pool {
         );
     }
 
-    // src/UniswapV3Pool.sol
-
+    // TODO 重构提取获取价格算法,提取为一个view或pure方法,方便前端使用
     function swap(
         address recipient, // 接受地址
         bool zeroForOne, //换出什么: zero => token0(x) one=>token1(y)
