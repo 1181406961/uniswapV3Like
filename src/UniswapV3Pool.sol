@@ -10,6 +10,7 @@ import "./lib/Tick.sol";
 import "./lib/TickBitmap.sol";
 import "./lib/TickMath.sol";
 import "./lib/SwapMath.sol";
+import "./lib/LiquidityMath.sol";
 
 contract UniswapV3Pool {
     using Tick for mapping(int24 => Tick.Info);
@@ -20,6 +21,7 @@ contract UniswapV3Pool {
     error InvalidTickRange();
     error ZeroLiquidity();
     error InsufficientInputAmount();
+    error NotEnoughLiquidity();
     // 相关事件
     // mint
     event Mint(
@@ -61,6 +63,8 @@ contract UniswapV3Pool {
         // 新price和tick
         uint160 sqrtPriceX96;
         int24 tick;
+        uint128 liquidity;
+
     }
 
     struct StepState {
@@ -126,8 +130,8 @@ contract UniswapV3Pool {
         if (amount == 0) {
             revert ZeroLiquidity();
         }
-        bool flippedLower = ticks.update(lowerTick, amount);
-        bool flippedUpper = ticks.update(upperTick, amount);
+        bool flippedLower = ticks.update(lowerTick, int128(amount), false);
+        bool flippedUpper = ticks.update(upperTick, int128(amount), true);
         // 记录流动性创建index
         if (flippedLower) {
             tickBitmap.flipTick(lowerTick, 1);
@@ -142,21 +146,50 @@ contract UniswapV3Pool {
         );
         position.update(amount);
         Slot0 memory slot0_ = slot0;
+        // 当前price range 太高说明只需要ETH
+        if (slot0_.tick < lowerTick) {
+            amount0 = Math.calcAmount0Delta(
+                TickMath.getSqrtRatioAtTick(lowerTick),
+                TickMath.getSqrtRatioAtTick(upperTick),
+                amount
+            );
+        } else if (slot0_.tick < upperTick) {
+            amount0 = Math.calcAmount0Delta(
+                slot0_.sqrtPriceX96,
+                TickMath.getSqrtRatioAtTick(upperTick),
+                amount
+            );
+
+            amount1 = Math.calcAmount1Delta(
+                slot0_.sqrtPriceX96,
+                TickMath.getSqrtRatioAtTick(lowerTick),
+                amount
+            );
+            liquidity = LiquidityMath.addLiquidity(liquidity, int128(amount));
+        } else {
+            // 当price range 太低说明只需要USDC
+            amount1 = Math.calcAmount1Delta(
+                TickMath.getSqrtRatioAtTick(lowerTick),
+                TickMath.getSqrtRatioAtTick(upperTick),
+                amount
+            );
+        }
+
         // 根据用户输入的流动性和price，计算出用户需要投入多少x和y。
         // amount0 => x
-        amount0 = Math.calcAmount0Delta(
-            slot0_.sqrtPriceX96,
-            TickMath.getSqrtRatioAtTick(upperTick),
-            amount
-        );
+        // amount0 = Math.calcAmount0Delta(
+        //     slot0_.sqrtPriceX96,
+        //     TickMath.getSqrtRatioAtTick(upperTick),
+        //     amount
+        // );
         // amount1 => y
-        amount1 = Math.calcAmount1Delta(
-            slot0_.sqrtPriceX96,
-            TickMath.getSqrtRatioAtTick(lowerTick),
-            amount
-        );
+        // amount1 = Math.calcAmount1Delta(
+        //     slot0_.sqrtPriceX96,
+        //     TickMath.getSqrtRatioAtTick(lowerTick),
+        //     amount
+        // );
         // 更新流动性
-        liquidity += uint128(amount);
+        // liquidity += uint128(amount);
         uint256 balance0Before;
         uint256 balance1Before;
         if (amount0 > 0) {
@@ -198,11 +231,13 @@ contract UniswapV3Pool {
         bytes calldata data
     ) public returns (int256 amount0, int256 amount1) {
         Slot0 memory slot0_ = slot0;
+        uint128 liquidity_ = liquidity;
         SwapState memory state = SwapState({
             amountSpecifiedRemaining: amountSpecified,
             amountCalculated: 0,
             sqrtPriceX96: slot0_.sqrtPriceX96,
-            tick: slot0_.tick
+            tick: slot0_.tick,
+            liquidity: liquidity_
         });
         while (state.amountSpecifiedRemaining > 0) {
             StepState memory step;
@@ -222,18 +257,37 @@ contract UniswapV3Pool {
                 .computeSwapStep(
                     state.sqrtPriceX96,
                     step.sqrtPriceNextX96,
-                    liquidity,
+                    state.liquidity,
                     state.amountSpecifiedRemaining
                 );
             // 更新state
             state.amountSpecifiedRemaining -= step.amountIn;
             state.amountCalculated += step.amountOut;
-            state.tick = TickMath.getTickAtSqrtRatio(state.sqrtPriceX96);
+            // 如果nextPrice是在下一个价格区间，则进行更新liquidity,否则只更新当前价格
+            if (state.sqrtPriceX96 == step.sqrtPriceNextX96) {
+                int128 liquidityDelta = ticks.cross(step.nextTick);
+
+                if (zeroForOne) liquidityDelta = -liquidityDelta;
+
+                state.liquidity = LiquidityMath.addLiquidity(
+                    state.liquidity,
+                    liquidityDelta
+                );
+
+                if (state.liquidity == 0) revert NotEnoughLiquidity();
+
+                state.tick = zeroForOne ? step.nextTick - 1 : step.nextTick;
+            } else if (state.sqrtPriceX96 != step.sqrtPriceStartX96) {
+                state.tick = TickMath.getTickAtSqrtRatio(state.sqrtPriceX96);
+            }
         }
         // 检查一下state，更新系统当前的tick和price。
         if (state.tick != slot0_.tick) {
             (slot0.sqrtPriceX96, slot0.tick) = (state.sqrtPriceX96, state.tick);
         }
+        // 最后检查一下liquidity，save gas。
+        if (liquidity_ != state.liquidity) liquidity = state.liquidity;
+
         // 根据 false=x true=y 来决定pool应该出和入哪种token
         (amount0, amount1) = zeroForOne
             ? (

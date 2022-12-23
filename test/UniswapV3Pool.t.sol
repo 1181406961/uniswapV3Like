@@ -55,6 +55,24 @@ library Params {
             );
         }
     }
+
+    function getDefaultParms()
+        public
+        pure
+        returns (TestCaseParams memory params)
+    {
+        params = Params.TestCaseParams({
+            wethBalance: 1 ether,
+            usdcBalance: 5000209190920489524100,
+            currentTick: 85176,
+            lowerTick: 84222,
+            upperTick: 86129,
+            liquidity: 1517882343751509868544,
+            currentSqrtP: 5602277097478614198912276234240,
+            shouldTransferInCallback: true,
+            mintLiquidity: true
+        });
+    }
 }
 
 contract UniswapV3PoolTest is Test {
@@ -70,17 +88,7 @@ contract UniswapV3PoolTest is Test {
     }
 
     function testMintSuccess() public {
-        Params.TestCaseParams memory params = Params.TestCaseParams({
-            wethBalance: 1 ether,
-            usdcBalance: 5000209190920489524100,
-            currentTick: 85176,
-            lowerTick: 84222,
-            upperTick: 86129,
-            liquidity: 1517882343751509868544,
-            currentSqrtP: 5602277097478614198912276234240,
-            shouldTransferInCallback: true,
-            mintLiquidity: true
-        });
+        Params.TestCaseParams memory params = Params.getDefaultParms();
         (uint256 poolBalance0, uint256 poolBalance1) = setupTestCase(params);
         uint256 expectedAmount0 = 998628802115141959;
         uint256 expectedAmount1 = 5000209190920489524100;
@@ -104,13 +112,13 @@ contract UniswapV3PoolTest is Test {
         uint128 posLiquidity = pool.positions(positionKey);
         // 验证position
         assertEq(posLiquidity, params.liquidity);
-        (bool tickInitialized, uint128 tickLiquidity) = pool.ticks(
+        (bool tickInitialized, uint128 tickLiquidity,) = pool.ticks(
             params.lowerTick
         );
         // 验证tick
         assertTrue(tickInitialized);
         assertEq(tickLiquidity, params.liquidity);
-        (tickInitialized, tickLiquidity) = pool.ticks(params.upperTick);
+        (tickInitialized, tickLiquidity,) = pool.ticks(params.upperTick);
         assertTrue(tickInitialized);
         assertEq(tickLiquidity, params.liquidity);
         // 验证价格
@@ -143,44 +151,27 @@ contract UniswapV3PoolTest is Test {
     }
 
     function testTickTooLow() public {
-        Params.TestCaseParams memory params = Params.TestCaseParams({
-            wethBalance: 1 ether,
-            usdcBalance: 5000209190920489524100,
-            currentTick: 85176,
-            lowerTick: -887273,
-            upperTick: 86129,
-            liquidity: 1517882343751509868544,
-            currentSqrtP: 5602277097478614198912276234240,
-            shouldTransferInCallback: true,
-            mintLiquidity: true
-        });
+        // Params.TestCaseParams memory params = Params.TestCaseParams({
+        //     wethBalance: 1 ether,
+        //     usdcBalance: 5000209190920489524100,
+        //     currentTick: 85176,
+        //     lowerTick: -887273,
+        //     upperTick: 86129,
+        //     liquidity: 1517882343751509868544,
+        //     currentSqrtP: 5602277097478614198912276234240,
+        //     shouldTransferInCallback: true,
+        //     mintLiquidity: true
+        // });
+        Params.TestCaseParams memory params = Params.getDefaultParms();
+        params.lowerTick = -887273;
         pool = params.createPool(token0, token1);
         vm.expectRevert(UniswapV3Pool.InvalidTickRange.selector);
         params.poolMint(pool, token0, token1, address(this));
     }
 
-    // TODO 测试太高的情况
-    function testTickTooHigh() public {}
-
-    // TODO 测试liquidity为0的情况
-    function testLiquidityIsZero() public {}
-
-    // TODO 测试provider余额不足的时候
-    function testProviderNotEngouhToken() public {}
-
     // 测试交换token
     function testSwapBuyEth() public {
-        Params.TestCaseParams memory params = Params.TestCaseParams({
-            wethBalance: 1 ether,
-            usdcBalance: 5000209190920489524100,
-            currentTick: 85176,
-            lowerTick: 84222,
-            upperTick: 86129,
-            liquidity: 1517882343751509868544,
-            currentSqrtP: 5602277097478614198912276234240,
-            shouldTransferInCallback: true,
-            mintLiquidity: true
-        });
+        Params.TestCaseParams memory params = Params.getDefaultParms();
         (uint256 poolBalance0, uint256 poolBalance1) = setupTestCase(params);
         token1.mint(address(this), 42 ether);
         token1.approve(address(this), 42 ether);
@@ -236,6 +227,23 @@ contract UniswapV3PoolTest is Test {
             "invalid current liquidity"
         );
     }
+
+    // function testSwapBuyEthNotEnoughLiquidity() public {
+    //     uint256 swapAmount = 5300 ether;
+    //     Params.TestCaseParams memory params = Params.getDefaultParms();
+    //     setupTestCase(params);
+    //     token1.mint(address(this), 42 ether);
+    //     token1.approve(address(this), 42 ether);
+    //     bytes memory extra = abi.encode(
+    //         UniswapV3Pool.CallbackData({
+    //             token0: address(token0),
+    //             token1: address(token1),
+    //             payer: address(this)
+    //         })
+    //     );
+    //     vm.expectRevert(stdError.arithmeticError);
+    //     pool.swap(address(this), false, swapAmount, extra);
+    // }
 
     function uniswapV3MintCallback(
         uint256 amount0,
@@ -293,17 +301,18 @@ contract NotSwapHackerContract is Test {
 
     // 测试交换token时余额不足
     function testSwapTokenBalanceNotEnough() public {
-        Params.TestCaseParams memory params = Params.TestCaseParams({
-            wethBalance: 1 ether,
-            usdcBalance: 5000209190920489524100,
-            currentTick: 85176,
-            lowerTick: 84222,
-            upperTick: 86129,
-            liquidity: 1517882343751509868544,
-            currentSqrtP: 5602277097478614198912276234240,
-            shouldTransferInCallback: true,
-            mintLiquidity: true
-        });
+        // Params.TestCaseParams memory params = Params.TestCaseParams({
+        //     wethBalance: 1 ether,
+        //     usdcBalance: 5000209190920489524100,
+        //     currentTick: 85176,
+        //     lowerTick: 84222,
+        //     upperTick: 86129,
+        //     liquidity: 1517882343751509868544,
+        //     currentSqrtP: 5602277097478614198912276234240,
+        //     shouldTransferInCallback: true,
+        //     mintLiquidity: true
+        // });
+        Params.TestCaseParams memory params = Params.getDefaultParms();
         pool = params.createPool(token0, token1);
         params.poolMint(pool, token0, token1, address(this));
         vm.expectRevert(UniswapV3Pool.InsufficientInputAmount.selector);
