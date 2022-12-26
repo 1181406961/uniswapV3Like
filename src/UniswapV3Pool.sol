@@ -259,14 +259,15 @@ contract UniswapV3Pool is IUniswapV3Pool {
             // 检查是否跨price区间了
             if (state.sqrtPriceX96 == step.sqrtPriceNextX96) {
                 int128 liquidityDelta = ticks.cross(step.nextTick);
-                // 这里取反操作，当穿过下界(价格降低)tick时增加流动性，当穿过上界(价格上涨)tick时减少流动性
+                // 当价格从lower => upper移动时，穿过low时增加liquidity,穿过upper减少liquidity
+                // 当价格从upper => lower移动时，穿过upper增加liquidity，穿过low减少liquidity
                 if (zeroForOne) liquidityDelta = -liquidityDelta;
              
                 state.liquidity = LiquidityMath.addLiquidity(
                     state.liquidity,
                     liquidityDelta
                 );
-                // 当到达最右边界时，没有流动性了。此时交易只能部分成交
+                // 当到达极限边界时，没有流动性了。此时交易只能部分成交
                 if (state.liquidity == 0) revert NotEnoughLiquidity();
                 // 开闭区间问题 左闭右开，如果穿过下界到下一个区间需要减一
                 state.tick = zeroForOne ? step.nextTick - 1 : step.nextTick;

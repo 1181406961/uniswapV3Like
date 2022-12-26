@@ -37,9 +37,9 @@ library Tick {
 
         tickInfo.liquidityGross = liquidityAfter;
         tickInfo.liquidityNet = upper
-            // 当超过上界了，减少流动性
+            // 当移动出当前price区间的upper减少流动性
             ? int128(int256(tickInfo.liquidityNet) - liquidityDelta)
-            // 当降低出下界了，增加流动性
+            // 当进入到当前的price区间的lower增加流动性
             : int128(int256(tickInfo.liquidityNet) + liquidityDelta);
     }
     // 当tick跨区时返回需要添加或减少的流动性
