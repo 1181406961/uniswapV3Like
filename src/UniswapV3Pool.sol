@@ -49,15 +49,13 @@ contract UniswapV3Pool is IUniswapV3Pool {
         int24 tick
     );
 
-    // Pool tokens, immutable
     address public immutable token0;
     address public immutable token1;
 
-    // First slot will contain essential data
     struct Slot0 {
-        // Current sqrt(P)
+        // 当前价格
         uint160 sqrtPriceX96;
-        // Current tick
+        // 当前价格对应的tick
         int24 tick;
     }
 
@@ -80,7 +78,7 @@ contract UniswapV3Pool is IUniswapV3Pool {
 
     Slot0 public slot0;
 
-    // Amount of liquidity, L.
+    // 当前价格区间的总的liquidity
     uint128 public liquidity;
 
     mapping(int24 => Tick.Info) public ticks;

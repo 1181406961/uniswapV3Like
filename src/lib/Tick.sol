@@ -7,10 +7,8 @@ import "./Math.sol";
 library Tick {
     struct Info {
         bool initialized;
-        // total liquidity at tick
         // 总的流动性
         uint128 liquidityGross;
-        // amount of liqudiity added or subtracted when tick is crossed
         // 当跨tick的时候需要添加或删除的流动性
         int128 liquidityNet;
     }
