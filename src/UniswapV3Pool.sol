@@ -6,6 +6,7 @@ import "./interfaces/IUniswapV3FlashCallback.sol";
 import "./interfaces/IUniswapV3MintCallback.sol";
 import "./interfaces/IUniswapV3Pool.sol";
 import "./interfaces/IUniswapV3SwapCallback.sol";
+import "./interfaces/IUniswapV3PoolDeployer.sol";
 
 import "./lib/LiquidityMath.sol";
 import "./lib/Math.sol";
@@ -26,6 +27,7 @@ contract UniswapV3Pool is IUniswapV3Pool {
     error InvalidTickRange();
     error NotEnoughLiquidity();
     error ZeroLiquidity();
+    error AlreadyInitialized();
     // 闪电贷事件
     event Flash(address indexed recipient, uint256 amount0, uint256 amount1);
     // 添加流动性
@@ -48,9 +50,11 @@ contract UniswapV3Pool is IUniswapV3Pool {
         uint128 liquidity,
         int24 tick
     );
-
+    // 工厂地址，token0，token1，tickSpacing初始化参数
+    address public immutable factory;
     address public immutable token0;
     address public immutable token1;
+    uint24 public immutable tickSpacing;
 
     struct Slot0 {
         // 当前价格
@@ -70,7 +74,7 @@ contract UniswapV3Pool is IUniswapV3Pool {
     struct StepState {
         uint160 sqrtPriceStartX96; // 开始价格
         int24 nextTick; // 下一个价格
-        bool initialized; 
+        bool initialized;
         uint160 sqrtPriceNextX96;
         uint256 amountIn;
         uint256 amountOut;
@@ -85,14 +89,27 @@ contract UniswapV3Pool is IUniswapV3Pool {
     mapping(int16 => uint256) public tickBitmap;
     mapping(bytes32 => Position.Info) public positions;
 
-    constructor(
-        address token0_,
-        address token1_,
-        uint160 sqrtPriceX96,
-        int24 tick
-    ) {
-        token0 = token0_;
-        token1 = token1_;
+    // constructor(
+    //     address token0_,
+    //     address token1_,
+    //     uint160 sqrtPriceX96,
+    //     int24 tick
+    // ) {
+    //     token0 = token0_;
+    //     token1 = token1_;
+
+    //     slot0 = Slot0({sqrtPriceX96: sqrtPriceX96, tick: tick});
+    // }
+    constructor() {
+        (factory, token0, token1, tickSpacing) = IUniswapV3PoolDeployer(
+            msg.sender
+        ).parameters();
+    }
+
+    function initialize(uint160 sqrtPriceX96) public {
+        if (slot0.sqrtPriceX96 != 0) revert AlreadyInitialized();
+
+        int24 tick = TickMath.getTickAtSqrtRatio(sqrtPriceX96);
 
         slot0 = Slot0({sqrtPriceX96: sqrtPriceX96, tick: tick});
     }
@@ -119,11 +136,11 @@ contract UniswapV3Pool is IUniswapV3Pool {
 
         // 将lower和upper放入到bitMap中
         if (flippedLower) {
-            tickBitmap.flipTick(lowerTick, 1);
+            tickBitmap.flipTick(lowerTick, int24(tickSpacing));
         }
 
         if (flippedUpper) {
-            tickBitmap.flipTick(upperTick, 1);
+            tickBitmap.flipTick(upperTick, int24(tickSpacing));
         }
         // 记录该用户的流动性
         Position.Info storage position = positions.get(
@@ -155,7 +172,7 @@ contract UniswapV3Pool is IUniswapV3Pool {
                 TickMath.getSqrtRatioAtTick(lowerTick),
                 amount
             );
-            liquidity = LiquidityMath.addLiquidity(liquidity, int128(amount)); 
+            liquidity = LiquidityMath.addLiquidity(liquidity, int128(amount));
         } else {
             // 当价格区间低于当前价格时，只需要token1，y
             amount1 = Math.calcAmount1Delta(
@@ -190,9 +207,10 @@ contract UniswapV3Pool is IUniswapV3Pool {
             amount1
         );
     }
+
     function swap(
         address recipient,
-        bool zeroForOne,// zero=false输出token0，one=true输出token1，根据公式 p = y/x: 当输出x的时候价格上涨，输出y的时候价格下降
+        bool zeroForOne, // zero=false输出token0，one=true输出token1，根据公式 p = y/x: 当输出x的时候价格上涨，输出y的时候价格下降
         uint256 amountSpecified, // 与输出token对应的，用户需要投入的多少token
         uint160 sqrtPriceLimitX96,
         bytes calldata data
@@ -201,11 +219,9 @@ contract UniswapV3Pool is IUniswapV3Pool {
         uint128 liquidity_ = liquidity;
         // 滑点保护
         if (
-            zeroForOne
-            // 当输出token1时，价格下降，但是不能小于limit
+            zeroForOne // 当输出token1时，价格下降，但是不能小于limit
                 ? sqrtPriceLimitX96 > slot0_.sqrtPriceX96 ||
-                    sqrtPriceLimitX96 < TickMath.MIN_SQRT_RATIO
-            // 当输出token0时，价格上涨，但是不能超过limit
+                    sqrtPriceLimitX96 < TickMath.MIN_SQRT_RATIO // 当输出token0时，价格上涨，但是不能超过limit
                 : sqrtPriceLimitX96 < slot0_.sqrtPriceX96 ||
                     sqrtPriceLimitX96 > TickMath.MAX_SQRT_RATIO
         ) revert InvalidPriceLimit();
@@ -229,7 +245,7 @@ contract UniswapV3Pool is IUniswapV3Pool {
             // 根据当前价格，以及换出的方向，在bitmap中寻找下一个tick。
             (step.nextTick, ) = tickBitmap.nextInitializedTickWithinOneWord(
                 state.tick,
-                1,
+                int24(tickSpacing),
                 zeroForOne
             );
 
@@ -260,7 +276,7 @@ contract UniswapV3Pool is IUniswapV3Pool {
                 // 当价格按从lower => upper方向移动时，穿过lower时增加liquidity,穿过upper减少liquidity
                 // 当价格按从upper => lower方向移动时，穿过upper增加liquidity，穿过lower减少liquidity
                 if (zeroForOne) liquidityDelta = -liquidityDelta;
-             
+
                 state.liquidity = LiquidityMath.addLiquidity(
                     state.liquidity,
                     liquidityDelta
