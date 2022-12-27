@@ -297,27 +297,30 @@ contract UniswapV3Pool is IUniswapV3Pool {
         if (liquidity_ != state.liquidity) liquidity = state.liquidity;
 
         (amount0, amount1) = zeroForOne
+           // 转给用户token1，用户转给pool token0
             ? (
                 int256(amountSpecified - state.amountSpecifiedRemaining),
                 -int256(state.amountCalculated)
             )
+            // 转给用户token0，用户转给pool token1
             : (
                 -int256(state.amountCalculated),
                 int256(amountSpecified - state.amountSpecifiedRemaining)
             );
-        // 根据方向来决定转入转出方向
         if (zeroForOne) {
+            // 转给用户token1
             IERC20(token1).transfer(recipient, uint256(-amount1));
-
             uint256 balance0Before = balance0();
             IUniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(
                 amount0,
                 amount1,
                 data
             );
+            // 用户转给pool token0
             if (balance0Before + uint256(amount0) > balance0())
                 revert InsufficientInputAmount();
         } else {
+            // 转给用户token0
             IERC20(token0).transfer(recipient, uint256(-amount0));
 
             uint256 balance1Before = balance1();
@@ -326,6 +329,7 @@ contract UniswapV3Pool is IUniswapV3Pool {
                 amount1,
                 data
             );
+            // 用户转给pool token1
             if (balance1Before + uint256(amount1) > balance1())
                 revert InsufficientInputAmount();
         }
@@ -340,7 +344,7 @@ contract UniswapV3Pool is IUniswapV3Pool {
             slot0.tick
         );
     }
-
+    // 闪电贷
     function flash(
         uint256 amount0,
         uint256 amount1,
