@@ -17,7 +17,7 @@ library Oracle {
         // 初始化观测点,写入到0位置
         self[0] = Observation({
             timestamp: time,
-            tickCumulative: 0,
+            tickCumulative: 0, //初始化
             initialized: true
         });
         // 默认最大为1，也就是说默认情况下一个pool只能存2个
@@ -36,13 +36,15 @@ library Oracle {
         Observation memory last = self[index];
         // 当前的block时间戳记录了，则跳过，防止价格操纵机制
         if (last.timestamp == timestamp) return (index, cardinality);
-
+        // 说明当前可扩展的数量大于激活的数量，并且index在[0,cardinality)区间的最右侧，说明要扩展一个新位置
         if (cardinalityNext > cardinality && index == (cardinality - 1)) {
             cardinalityUpdated = cardinalityNext;
         } else {
             cardinalityUpdated = cardinality;
         }
         // 让下标始终保持在[0,cardinality) 区间中，达到上界时重置为0，也就是说默认情况下只重复更新一个观测
+        // 当cardinalityNext > cardinality，不会覆盖旧的，会始终使用新的位置知道到达cardinalityNext = cardinality
+        // 这里的取模运算时为了到达上界的时候重置为0，保存的观测数组是允许溢出的
         indexUpdated = (index + 1) % cardinalityUpdated;
         self[indexUpdated] = transform(last, timestamp, tick);
     }
@@ -53,7 +55,7 @@ library Oracle {
         uint16 next
     ) internal returns (uint16) {
         if (next <= current) return current;
-        // 为新的观测的timestamp设置新的非零值，来初始化观测
+        // 为新的观测的timestamp设置新的非零值，来初始化观测，真正更新的时候会填上对应的时间戳
         for (uint16 i = current; i < next; i++) {
             self[i].timestamp = 1;
         }
@@ -145,20 +147,22 @@ library Oracle {
         view
         returns (Observation memory beforeOrAt, Observation memory atOrAfter)
     {
+        // 先获取一下当前最新
         beforeOrAt = self[index];
-
+        // 如果target在当前最新的之后
         if (lte(time, beforeOrAt.timestamp, target)) {
 
             if (beforeOrAt.timestamp == target) {
                 return (beforeOrAt, atOrAfter);
             } else {
+                // 计算一下当前最新与target之间累积的一小段
                 return (beforeOrAt, transform(beforeOrAt, target, tick));
             }
         }
 
         beforeOrAt = self[(index + 1) % cardinality];
         if (!beforeOrAt.initialized) beforeOrAt = self[0];
-
+        // target必须比最老的观测点要早
         require(lte(time, beforeOrAt.timestamp, target), "OLD");
 
         return binarySearch(self, time, target, index, cardinality);
@@ -201,12 +205,13 @@ library Oracle {
 
             return atOrAfter.tickCumulative;
         } else {
-
+            
             uint56 observationTimeDelta = atOrAfter.timestamp -
                 beforeOrAt.timestamp;
             uint56 targetDelta = target - beforeOrAt.timestamp;
-        
+
             return
+            // 如果target在两个观测值记录点之间，这时使用时间加权平均
             // 价格变化率 * 时间段
                 beforeOrAt.tickCumulative +
                 ((atOrAfter.tickCumulative - beforeOrAt.tickCumulative) /

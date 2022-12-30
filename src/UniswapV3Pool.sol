@@ -97,9 +97,11 @@ contract UniswapV3Pool is IUniswapV3Pool {
         int24 tick;
         // 记录最新的观测的编号index
         uint16 observationIndex;
-        // 记录活跃的观测数量，也就是length
+        // 记录活跃的观测数量，也就是length。初始化时,观测数量=可扩展数量，表示不能扩展
+        // 保持数组中的活跃可观测点始终在[0,observationCardinality)范围中
         uint16 observationCardinality;
-        // 记录观测数组能够扩展到的下一个基数大小,下一个可存储的index
+        // 记录观测数组能够扩展到的下一个基数大小，默认为1
+        // 需要用户消耗gas来扩展
         uint16 observationCardinalityNext;
     }
 
