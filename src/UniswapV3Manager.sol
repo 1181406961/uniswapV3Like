@@ -178,6 +178,7 @@ contract UniswapV3Manager is IUniswapV3Manager {
         address token1,
         uint24 fee
     ) internal view returns (IUniswapV3Pool pool) {
+        // 将token0和token1进行排序，这样方便后面判断谁是token0和token1，也方便计算交换token的方向
         (token0, token1) = token0 < token1
             ? (token0, token1)
             : (token1, token0);
